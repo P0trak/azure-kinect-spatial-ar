@@ -4,6 +4,7 @@ using RoomAliveToolkit;
 using System.Diagnostics;
 using System.IO;
 using System.Threading;
+using System.Threading.Tasks;
 using System.ServiceModel;
 using System.ServiceModel.Discovery;
 using System.Collections.Generic;
@@ -13,7 +14,7 @@ using RoomAliveToolKit;
 
 namespace RoomAliveToolKit
 {
-    public class KinectHandlerAzure
+    public class KinectHandlerAzure:IDisposable
     {
         public static KinectHandlerAzure instance;
         Device kinectSensor;
@@ -41,6 +42,9 @@ namespace RoomAliveToolKit
         ImagingFactory imagingFactory = new ImagingFactory();
         Stopwatch stopWatch = new Stopwatch();
 
+        CancellationTokenSource _cancellationTokenSource;
+        CancellationToken _token;
+
         public KinectHandlerAzure()
         {
             instance = this;
@@ -51,11 +55,9 @@ namespace RoomAliveToolKit
             kinectAzureCalibrationReady.Set();
             //kinectSensor.CoordinateMapper.CoordinateMappingChanged += CoordinateMapper_CoordinateMappingChanged;
 
-            Capture capture = kinectSensor.GetCapture();
-            Image colourFrame = capture.Color;
-            Image depthFrame = capture.Depth;
-            processColourFrame(colourFrame);
-            processDepthFrame(depthFrame);
+            _cancellationTokenSource = new CancellationTokenSource();
+            _token = _cancellationTokenSource.Token;
+            Task.Run(() => RunCameraThreadAsync(_token));
         }
 
         //not sure about the coordinate mapper stuff - do i actually need this?
@@ -181,6 +183,37 @@ namespace RoomAliveToolKit
                     }
                 }
             }
+        }
+
+        void RunCameraThreadAsync(CancellationToken token)
+        {
+            kinectSensor.StartCameras(new DeviceConfiguration()
+            {
+                CameraFPS = FPS.FPS30,
+                ColorResolution = ColorResolution.Off,
+                DepthMode = DepthMode.NFOV_Unbinned,
+                WiredSyncMode = WiredSyncMode.Standalone,
+            });
+
+            while(!token.IsCancellationRequested)
+            {
+                Capture capture = kinectSensor.GetCapture();
+
+                if (capture != null)
+                {
+                    Image colour = capture.Color;
+                    Image depth = capture.Depth;
+
+                    processColourFrame(colour);
+                    processDepthFrame(depth);
+                }
+            }
+            Dispose();
+        }
+
+        public void Dispose()
+        {
+           kinectSensor.Dispose();
         }
 
         //idk if we need any of the body frame stuff
